@@ -14,12 +14,29 @@ Usage:
     python agent.py
 """
 
-import sys
+import logging
 from pathlib import Path
+from pprint import pformat
 from anthropic import Anthropic
+from rich.console import Console
+from rich.markdown import Markdown
+
+# Configure logging
+pformat_width = 200
+loggingLevel = logging.INFO
+DEMO_MODE = True  # Set to True to show all context before each API call
+
+logging.basicConfig(
+    level=loggingLevel,
+    format='[%(levelname)s] %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Initialize the Anthropic client
 client = Anthropic()
+
+# Initialize Rich console for markdown rendering
+console = Console()
 
 # System prompt that defines the agent's behavior
 SYSTEM_PROMPT = """You are a helpful coding assistant that can read, write, and manage files.
@@ -38,6 +55,8 @@ When given a task:
 Always be careful when writing files - make sure you understand the existing content first."""
 
 # Define the tools the agent can use
+# This goes into the prompt to the model to let the model know how to call different Python functions
+# Is this model context protocol? ---- very similar, same way that we feed MCP tools in
 TOOLS = [
     {
         "name": "read_file",
@@ -89,6 +108,9 @@ TOOLS = [
 ]
 
 
+# For sake of the demo, I think it makes more sense to write these functions first -- define tools in code first since that's most
+# familiar. The tool list above is an API that converts natural language to a code call, and explains to the AI agent how to use
+# it
 def read_file(path: str) -> str:
     """Read and return the contents of a file."""
     try:
@@ -139,6 +161,7 @@ def list_files(path: str = ".") -> str:
         return f"Error listing directory: {e}"
 
 
+# How does this thing fit in? -- converts the string form of the tool name to a function call
 def execute_tool(tool_name: str, tool_input: dict) -> str:
     """Execute a tool and return its result."""
     try:
@@ -174,12 +197,9 @@ def run_agent(user_message: str, conversation_history: list = None) -> None:
 
     # ReAct loop - keep going until the model stops using tools
     while True:
-        # Collect the full response while streaming
-        assistant_content = []
-        current_text = ""
-        current_tool_use = None
+        # Collect text for markdown rendering
+        collected_text = []
 
-        # Stream the response
         with client.messages.stream(
             model="claude-sonnet-4-20250514",
             max_tokens=4096,
@@ -188,44 +208,18 @@ def run_agent(user_message: str, conversation_history: list = None) -> None:
             messages=conversation_history
         ) as stream:
             for event in stream:
-                # Handle different event types
-                if event.type == "content_block_start":
-                    if event.content_block.type == "text":
-                        current_text = ""
-                    elif event.content_block.type == "tool_use":
-                        current_tool_use = {
-                            "type": "tool_use",
-                            "id": event.content_block.id,
-                            "name": event.content_block.name,
-                            "input": {}
-                        }
-                        # Show real-time feedback when a tool use starts
-                        print(f"\n  → Using tool: {current_tool_use['name']}")
-                        sys.stdout.flush()
-
-                elif event.type == "content_block_delta":
+                if event.type == "content_block_delta":
                     if event.delta.type == "text_delta":
-                        # Stream text to stdout immediately
-                        sys.stdout.write(event.delta.text)
-                        sys.stdout.flush()
-                        current_text += event.delta.text
-                    elif event.delta.type == "input_json_delta":
-                        # Accumulate tool input JSON
-                        pass  # We'll get the full input from the final message
-
-                elif event.type == "content_block_stop":
-                    if current_text:
-                        assistant_content.append({
-                            "type": "text",
-                            "text": current_text
-                        })
-                        current_text = ""
-                    elif current_tool_use:
-                        # Tool use block completed
-                        current_tool_use = None
+                        # Collect text chunks for markdown rendering
+                        collected_text.append(event.delta.text)
 
             # Get the final message to extract complete tool uses
             final_message = stream.get_final_message()
+
+        # Render collected text as markdown
+        if collected_text:
+            full_text = ''.join(collected_text)
+            console.print(Markdown(full_text))
 
         # Use the content from the final message (has complete tool inputs)
         conversation_history.append({
@@ -237,10 +231,10 @@ def run_agent(user_message: str, conversation_history: list = None) -> None:
         tool_uses = [block for block in final_message.content if block.type == "tool_use"]
 
         if tool_uses:
-            # Process each tool use
             tool_results = []
             for block in tool_uses:
                 result = execute_tool(block.name, block.input)
+                logger.info("Executed tool: \"%s\", results:\n%s", block.name, result)
 
                 tool_results.append({
                     "type": "tool_result",
@@ -254,46 +248,46 @@ def run_agent(user_message: str, conversation_history: list = None) -> None:
                 "content": tool_results
             })
             # Continue loop to get Claude's next response
+            logger.info("Running the model with tool outputs")
 
         else:
             # No tool uses - we're done
-            print()  # Final newline after streamed content
+            logger.info("ReAct loop complete, prompting user")
             return
 
 
 def main():
     """Main chat loop."""
-    print("=" * 60)
-    print("Baby Code Phase 1: Minimum Viable Coding Agent")
-    print("=" * 60)
-    print("Commands: 'quit' to exit, 'clear' to reset conversation")
-    print("=" * 60)
-    print()
+    console.print("\n[bold]Baby Code Phase 1: Minimum Viable Coding Agent[/bold]")
+    console.print("[dim]Commands: 'quit' to exit, 'clear' to reset conversation[/dim]\n")
 
     conversation_history = []
 
     while True:
         try:
-            user_input = input("You: ").strip()
+            # Get user input
+            console.print("[bold]>[/bold] ", end="")
+            user_input = input().strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nGoodbye!")
+            console.print("\n[dim]Goodbye![/dim]")
             break
 
         if not user_input:
             continue
 
         if user_input.lower() == 'quit':
-            print("Goodbye!")
+            console.print("\n[dim]Goodbye![/dim]\n")
             break
 
         if user_input.lower() == 'clear':
             conversation_history = []
-            print("Conversation cleared.\n")
+            console.print("[dim]Conversation cleared.[/dim]\n")
             continue
 
-        print("\nAgent: ", end="", flush=True)
+        # Visual separator before agent response
+        console.rule("[bold green]Agent", style="green")
         run_agent(user_input, conversation_history)
-        print()
+        print()  # Add spacing after response
 
 
 if __name__ == "__main__":
