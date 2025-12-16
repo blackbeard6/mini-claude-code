@@ -25,6 +25,8 @@ or
 cd refactored-mini-claude
 python agent.py
 ```
+#### Demo-mode
+Toggle `DEMO_MODE` to `True` in `refactored-mini-claude/config.py` to see the prompt being sent to Claude at every iteration of the ReAct loop.
 
 ### Available Commands
 - Type your requests naturally (e.g., "read the config.py file")
