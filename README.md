@@ -62,6 +62,7 @@ The agent implements the ReAct pattern:
 ## Development
 
 #### Ideas for extending
+- [ ] Give Claude a code-execution tool that allows it to run code and iterate on the results
 - [ ] Implement a `CLAUDE.md`-like system
 - [ ] Implement slash commands
 - [ ] Implement a toy MCP
