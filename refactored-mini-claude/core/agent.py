@@ -1,7 +1,7 @@
 """Core agent logic implementing the ReAct pattern."""
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from anthropic import Anthropic
 import config
 from tools.registry import ToolRegistry
@@ -27,10 +27,10 @@ class Agent:
 
     def run(self, user_message: str) -> None:
         """
-        Run the agent with a user message, streaming the response.
+        Run the agent with a user message.
 
         This implements the ReAct (Reason, Act, Observe) loop:
-        1. Send message to Claude (streaming)
+        1. Send message to Claude
         2. If Claude wants to use a tool, execute it and continue
         3. Repeat until Claude gives a final response
 
@@ -53,38 +53,28 @@ class Agent:
                     self.conversation_history
                 )
 
-            # Collect text for markdown rendering
-            collected_text = []
-
-            with self.client.messages.stream(
+            # Get response from Claude
+            response = self.client.messages.create(
                 model=config.MODEL,
                 max_tokens=config.MAX_TOKENS,
                 system=config.SYSTEM_PROMPT,
                 tools=self.tool_registry.get_tool_schemas(),
                 messages=self.conversation_history
-            ) as stream:
-                for event in stream:
-                    if event.type == "content_block_delta":
-                        if event.delta.type == "text_delta":
-                            # Collect text chunks for markdown rendering
-                            collected_text.append(event.delta.text)
+            )
 
-                # Get the final message to extract complete tool uses
-                final_message = stream.get_final_message()
+            # Render any text content as markdown
+            text_content = [block.text for block in response.content if hasattr(block, 'text')]
+            if text_content:
+                render_agent_response(''.join(text_content))
 
-            # Render collected text as markdown
-            if collected_text:
-                full_text = ''.join(collected_text)
-                render_agent_response(full_text)
-
-            # Use the content from the final message (has complete tool inputs)
+            # Add assistant's response to conversation history
             self.conversation_history.append({
                 "role": "assistant",
-                "content": final_message.content
+                "content": response.content
             })
 
             # Check if there are any tool uses
-            tool_uses = [block for block in final_message.content if block.type == "tool_use"]
+            tool_uses = [block for block in response.content if block.type == "tool_use"]
 
             if tool_uses:
                 tool_results = []

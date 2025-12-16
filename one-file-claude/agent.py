@@ -7,7 +7,6 @@ A simple coding agent in ~300 lines that can:
 - Write files
 - List directory contents
 - Reason through tasks using the ReAct pattern
-- Stream responses in real-time
 
 Usage:
     export ANTHROPIC_API_KEY="your-key"
@@ -16,13 +15,11 @@ Usage:
 
 import logging
 from pathlib import Path
-from pprint import pformat
 from anthropic import Anthropic
 from rich.console import Console
 from rich.markdown import Markdown
 
 # Configure logging
-pformat_width = 200
 loggingLevel = logging.INFO
 DEMO_MODE = True  # Set to True to show all context before each API call
 
@@ -56,7 +53,7 @@ Always be careful when writing files - make sure you understand the existing con
 
 # Define the tools the agent can use
 # This goes into the prompt to the model to let the model know how to call different Python functions
-# Is this model context protocol? ---- very similar, same way that we feed MCP tools in
+# Very similar to MCP
 TOOLS = [
     {
         "name": "read_file",
@@ -161,7 +158,7 @@ def list_files(path: str = ".") -> str:
         return f"Error listing directory: {e}"
 
 
-# How does this thing fit in? -- converts the string form of the tool name to a function call
+# Key piece -- Claude operates in natural language. This converts the natural language into a function call.
 def execute_tool(tool_name: str, tool_input: dict) -> str:
     """Execute a tool and return its result."""
     try:
@@ -179,10 +176,10 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
 
 def run_agent(user_message: str, conversation_history: list = None) -> None:
     """
-    Run the agent with a user message, streaming the response.
+    Run the agent with a user message.
 
     This implements the ReAct (Reason, Act, Observe) loop:
-    1. Send message to Claude (streaming)
+    1. Send message to Claude
     2. If Claude wants to use a tool, execute it and continue
     3. Repeat until Claude gives a final response
     """
@@ -197,38 +194,28 @@ def run_agent(user_message: str, conversation_history: list = None) -> None:
 
     # ReAct loop - keep going until the model stops using tools
     while True:
-        # Collect text for markdown rendering
-        collected_text = []
-
-        with client.messages.stream(
+        # Get response from Claude
+        response = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=4096,
             system=SYSTEM_PROMPT,
             tools=TOOLS,
             messages=conversation_history
-        ) as stream:
-            for event in stream:
-                if event.type == "content_block_delta":
-                    if event.delta.type == "text_delta":
-                        # Collect text chunks for markdown rendering
-                        collected_text.append(event.delta.text)
+        )
 
-            # Get the final message to extract complete tool uses
-            final_message = stream.get_final_message()
+        # Render any text content as markdown
+        text_content = [block.text for block in response.content if hasattr(block, 'text')]
+        if text_content:
+            console.print(Markdown(''.join(text_content)))
 
-        # Render collected text as markdown
-        if collected_text:
-            full_text = ''.join(collected_text)
-            console.print(Markdown(full_text))
-
-        # Use the content from the final message (has complete tool inputs)
+        # Add assistant's response to conversation history
         conversation_history.append({
             "role": "assistant",
-            "content": final_message.content
+            "content": response.content
         })
 
         # Check if there are any tool uses
-        tool_uses = [block for block in final_message.content if block.type == "tool_use"]
+        tool_uses = [block for block in response.content if block.type == "tool_use"]
 
         if tool_uses:
             tool_results = []

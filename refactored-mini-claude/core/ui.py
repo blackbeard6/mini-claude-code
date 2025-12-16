@@ -51,7 +51,7 @@ def render_agent_response(text: str) -> None:
         text: Response text to render
     """
     if text:
-        console.print(Markdown("⏺ " + text))
+        console.print(Markdown(text))
 
 
 def show_demo_context(
