@@ -16,13 +16,11 @@ A simple coding agent written for the purpose of giving developers a glimpse int
 
 ## Usage
 
-### Single-File Version (Simplest)
 ```bash
 cd one-file-claude
 python agent.py
 ```
-
-### Refactored Version (Modular)
+or
 ```bash
 cd refactored-mini-claude
 python agent.py
